@@ -59,7 +59,7 @@
 	        this.params = options;
 	        this.index_stream = new Rx.Subject();
 	        this.remote_ranges_stream = new Rx.Subject();
-	        //просто подписка с логгером
+	        this.current_values = new Rx.Subject();
 	        this.index_subs = this.index_stream
 	            .filter(function (x) { return x >= 0; })
 	            .subscribe(function (x) {
@@ -78,7 +78,7 @@
 	            var right_side = _this.params.size * (x + 1) + _this.params.right_buf;
 	            return [left_side >= 0 ? left_side : 0, right_side];
 	        });
-	        var missing_range = this.range_stream.map(function (x) {
+	        this.range_stream.map(function (x) {
 	            return _.chain(_.range(x[0], x[1])).filter(function (index) {
 	                return _.isUndefined(_this.cache[index]);
 	            }).sortBy(function (a) { return a; }).value();
@@ -86,15 +86,30 @@
 	            .subscribe(function (x) {
 	            _this.remote_ranges_stream.next(x);
 	        });
+	        var cached = this.range_stream.map(function (x) {
+	            return _.map(x, function (x) {
+	                return "cached: " + _this.cache[x];
+	            });
+	        });
+	        var remotes = new Rx.Subject();
+	        Rx.Observable.combineLatest(cached, remotes, function (cache, remote) {
+	            return _.map(cache, function (c, i) { return remote[i] ? remote[i] : cache[i]; });
+	        }).subscribe(function (x) {
+	            _this.current_values.next(x);
+	        });
 	        this.remote_ranges_stream.map(function (x) {
 	            return _this.params.load_data(x[0], x[x.length - 1]);
 	        })
 	            .map(function (promise) {
-	            promise.then(function (results) {
-	                console.log(results);
-	                return results;
+	            return Rx.Observable.fromPromise(promise);
+	        }).subscribe(function (x) {
+	            x.subscribe(function (x) {
+	                remotes.next(_.map(x, function (val) { return "remote " + val; }));
 	            });
-	        }).subscribe(function (x) { return console.log(x); });
+	        });
+	        this.current_values.subscribe(function (x) {
+	            console.log(" current " + x);
+	        });
 	    }
 	    Cursor.prototype.setIndex = function (new_index) {
 	        this.index_stream.next(new_index);
