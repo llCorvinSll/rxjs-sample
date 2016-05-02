@@ -30,7 +30,6 @@ class Cursor {
         this.remote_ranges_stream = new Rx.Subject<number[]>();
         this.current_values = new Rx.BehaviorSubject<string[]>([]);
 
-
         this.index_stream
             .filter((x) => x >= 0)
             .subscribe((x) => {
@@ -52,7 +51,6 @@ class Cursor {
             return [left_side >= 0 ? left_side : 0, right_side];
         });
 
-
         this.range_stream.map((x: number[]) => {
             return _
                 .chain<number>(_.range(x[0], x[1] + 1))
@@ -65,11 +63,8 @@ class Cursor {
         })
             .filter(x => x.length > 1)
             .subscribe((x) => {
-                console.log([x[0], x[x.length - 1]]);
-
                 this.remote_ranges_stream.next([x[0], x[x.length - 1] + this.params.right_buf]);
             });
-
 
         let cached = this.range_stream.map((x: number[]) => {
             return _.map<number>(_.range(x[0], x[1]), (x: number) => {
@@ -87,8 +82,7 @@ class Cursor {
             (remote, cache) => {
                 return _
                     .map(cache, (c, i) => {
-                        let index = c.index;
-                        let finded = _.find(remote, { index: index });
+                        let finded = _.find(remote, { index: c.index });
 
                         return finded ? finded : c;
                     });
@@ -161,7 +155,7 @@ var cursor = new Cursor({
     load_data: (frm: number, to: number) => {
         let $deferred = $.Deferred<number[]>();
 
-        setTimeout(() => { $deferred.resolve(_.range(frm, to)); }, 1000);
+        setTimeout(() => { $deferred.resolve(_.range(frm, to)); }, 2000);
 
         return $deferred.promise();
     }

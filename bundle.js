@@ -88,7 +88,6 @@
 	        })
 	            .filter(function (x) { return x.length > 1; })
 	            .subscribe(function (x) {
-	            console.log([x[0], x[x.length - 1]]);
 	            _this.remote_ranges_stream.next([x[0], x[x.length - 1] + _this.params.right_buf]);
 	        });
 	        var cached = this.range_stream.map(function (x) {
@@ -103,8 +102,7 @@
 	        remotes.combineLatest(cached, function (remote, cache) {
 	            return _
 	                .map(cache, function (c, i) {
-	                var index = c.index;
-	                var finded = _.find(remote, { index: index });
+	                var finded = _.find(remote, { index: c.index });
 	                return finded ? finded : c;
 	            });
 	        }).subscribe(function (x) {
@@ -151,7 +149,7 @@
 	    right_buf: 5,
 	    load_data: function (frm, to) {
 	        var $deferred = $.Deferred();
-	        setTimeout(function () { $deferred.resolve(_.range(frm, to)); }, 1000);
+	        setTimeout(function () { $deferred.resolve(_.range(frm, to)); }, 2000);
 	        return $deferred.promise();
 	    }
 	});
