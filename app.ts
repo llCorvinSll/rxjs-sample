@@ -29,7 +29,7 @@ class Cursor {
 
         this.index_stream = new Rx.Subject<number>();
         this.remote_ranges_stream = new Rx.Subject<number[]>();
-        this.current_values = new Rx.Subject<string[]>();
+        this.current_values = new Rx.BehaviorSubject<string[]>([]);
 
         this.index_subs = this.index_stream
             .filter((x) => x >= 0)
@@ -78,7 +78,20 @@ class Cursor {
             });
         });
 
-        let remotes = new Rx.Subject<string[]>();
+        let remotes = new Rx.BehaviorSubject<string[]>([]);
+        remotes.combineLatest(
+            cached,
+            (remote, cache) => {
+                return _
+                    .map(cache, (c, i) => {
+                        let index = c.index;
+                        let finded = _.find(remote, { index: index });
+
+                        return finded ? finded : c;
+                    });
+            }).subscribe((x) => {
+                this.current_values.next(x);
+            });
 
         this.remote_ranges_stream.map((x: number[]) => {
             return {
@@ -113,20 +126,6 @@ class Cursor {
                         })
                     );
                 }});
-
-
-        Rx.Observable.combineLatest(
-            cached,
-            remotes,
-            (cache, remote) => {
-                return _
-                    .map(cache, (c, i) => {
-                        let index = c.index;
-                        let finded = _.find(remote, { index: index });
-
-                        return finded ? finded : c;
-                    });
-            }).subscribe((x) => this.current_values.next(x))
     }
 
     public setIndex(new_index: number) {
@@ -146,7 +145,7 @@ class Cursor {
     private index_subs: Rx.Subscription;
     private index_stream: Rx.Subject<number>;
 
-    public current_values: Rx.Subject<string[]>;
+    public current_values: Rx.BehaviorSubject<string[]>;
 
     private remote_ranges_stream: Rx.Subject<number[]>;
 
@@ -195,7 +194,6 @@ cursor.current_values.subscribe((x) => {
         let selected = val.index === cursor.getIndex();
 
         $cont.append(`<p> ${val.index} - ${val.item} : loaded ${val.loaded} ${selected ? "+++" : ""} </p>`)
-
-    })
+    });
 
 })

@@ -59,7 +59,7 @@
 	        this.params = options;
 	        this.index_stream = new Rx.Subject();
 	        this.remote_ranges_stream = new Rx.Subject();
-	        this.current_values = new Rx.Subject();
+	        this.current_values = new Rx.BehaviorSubject([]);
 	        this.index_subs = this.index_stream
 	            .filter(function (x) { return x >= 0; })
 	            .subscribe(function (x) {
@@ -97,7 +97,17 @@
 	                return { index: x, value: "", loaded: false };
 	            });
 	        });
-	        var remotes = new Rx.Subject();
+	        var remotes = new Rx.BehaviorSubject([]);
+	        remotes.combineLatest(cached, function (remote, cache) {
+	            return _
+	                .map(cache, function (c, i) {
+	                var index = c.index;
+	                var finded = _.find(remote, { index: index });
+	                return finded ? finded : c;
+	            });
+	        }).subscribe(function (x) {
+	            _this.current_values.next(x);
+	        });
 	        this.remote_ranges_stream.map(function (x) {
 	            return {
 	                promise: _this.params.load_data(x[0], x[x.length - 1]),
@@ -125,14 +135,6 @@
 	                }));
 	            });
 	        });
-	        Rx.Observable.combineLatest(cached, remotes, function (cache, remote) {
-	            return _
-	                .map(cache, function (c, i) {
-	                var index = c.index;
-	                var finded = _.find(remote, { index: index });
-	                return finded ? finded : c;
-	            });
-	        }).subscribe(function (x) { return _this.current_values.next(x); });
 	    }
 	    Cursor.prototype.setIndex = function (new_index) {
 	        this.index_stream.next(new_index);
