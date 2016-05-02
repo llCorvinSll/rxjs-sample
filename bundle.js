@@ -60,7 +60,7 @@
 	        this.index_stream = new Rx.Subject();
 	        this.remote_ranges_stream = new Rx.Subject();
 	        this.current_values = new Rx.BehaviorSubject([]);
-	        this.index_subs = this.index_stream
+	        this.index_stream
 	            .filter(function (x) { return x >= 0; })
 	            .subscribe(function (x) {
 	            _this.current_index = x;
@@ -71,30 +71,32 @@
 	            return (Math.floor(x / (_this.params.size)));
 	        });
 	        this.range_stream = this.chunk_stream.map(function (x) {
-	            var left_side = _this.params.size * x - _this.params.left_buf;
-	            var right_side = _this.params.size * (x + 1) + _this.params.right_buf;
+	            var chunk_len = _this.params.size;
+	            var left_side = chunk_len * x - _this.params.left_buf;
+	            var right_side = chunk_len * (x + 1) + _this.params.right_buf;
 	            return [left_side >= 0 ? left_side : 0, right_side];
 	        });
 	        this.range_stream.map(function (x) {
-	            var res = _
+	            return _
 	                .chain(_.range(x[0], x[1] + 1))
 	                .filter(function (index) {
 	                return _.isUndefined(_this.cache[index]);
 	            })
+	                .uniq()
 	                .sortBy(function (a) { return a; })
 	                .value();
-	            return res;
 	        })
-	            .filter(function (x) { return x.length; })
+	            .filter(function (x) { return x.length > 1; })
 	            .subscribe(function (x) {
-	            _this.remote_ranges_stream.next([x[0], x[x.length - 1]]);
+	            console.log([x[0], x[x.length - 1]]);
+	            _this.remote_ranges_stream.next([x[0], x[x.length - 1] + _this.params.right_buf]);
 	        });
 	        var cached = this.range_stream.map(function (x) {
 	            return _.map(_.range(x[0], x[1]), function (x) {
 	                if (_this.cache[x] && _this.cache[x].loaded) {
 	                    return _this.cache[x];
 	                }
-	                return { index: x, value: "", loaded: false };
+	                return { index: x, item: "", loaded: false };
 	            });
 	        });
 	        var remotes = new Rx.BehaviorSubject([]);
@@ -114,7 +116,7 @@
 	                range: x
 	            };
 	        })
-	            .map(function (value) {
+	            .flatMap(function (value) {
 	            var newPromise = value.promise.then(function (values) {
 	                var range = _.range(value.range[0], value.range[1]);
 	                var res = {};
@@ -126,14 +128,13 @@
 	                });
 	            });
 	            return Rx.Observable.fromPromise(newPromise);
-	        }).subscribe(function (x) {
-	            x.subscribe(function (x) {
-	                remotes.next(_.map(x, function (val) {
-	                    var res = "remote " + val;
-	                    _this.cache[val] = { index: val, item: res, loaded: true };
-	                    return _this.cache[val];
-	                }));
-	            });
+	        })
+	            .subscribe(function (x) {
+	            remotes.next(_.map(x, function (val) {
+	                var res = "remote " + val;
+	                _this.cache[val] = { index: val, item: res, loaded: true };
+	                return _this.cache[val];
+	            }));
 	        });
 	    }
 	    Cursor.prototype.setIndex = function (new_index) {
@@ -150,7 +151,7 @@
 	    right_buf: 5,
 	    load_data: function (frm, to) {
 	        var $deferred = $.Deferred();
-	        setTimeout(function () { $deferred.resolve(_.range(frm, to)); }, 3000);
+	        setTimeout(function () { $deferred.resolve(_.range(frm, to)); }, 1000);
 	        return $deferred.promise();
 	    }
 	});
