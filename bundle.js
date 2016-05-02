@@ -69,9 +69,6 @@
 	            .filter(function (x) { return x >= 0; })
 	            .map(function (x) {
 	            return (Math.floor(x / (_this.params.size)));
-	        })
-	            .map(function (chunk_number) {
-	            return chunk_number;
 	        });
 	        this.range_stream = this.chunk_stream.map(function (x) {
 	            var left_side = _this.params.size * x - _this.params.left_buf;
@@ -81,22 +78,22 @@
 	        this.range_stream.map(function (x) {
 	            return _.chain(_.range(x[0], x[1])).filter(function (index) {
 	                return _.isUndefined(_this.cache[index]);
-	            }).sortBy(function (a) { return a; }).value();
+	            }).sortBy(function (a) { return a; }).compact().value();
 	        })
+	            .filter(function (x) { return x.length; })
 	            .subscribe(function (x) {
 	            _this.remote_ranges_stream.next(x);
 	        });
 	        var cached = this.range_stream.map(function (x) {
-	            return _.map(x, function (x) {
-	                return "cached: " + _this.cache[x];
+	            console.log(x);
+	            return _.map(_.range(x[0], x[1]), function (x) {
+	                if (_this.cache[x]) {
+	                    return "cached: " + _this.cache[x];
+	                }
+	                return undefined;
 	            });
 	        });
 	        var remotes = new Rx.Subject();
-	        Rx.Observable.combineLatest(cached, remotes, function (cache, remote) {
-	            return _.map(cache, function (c, i) { return remote[i] ? remote[i] : cache[i]; });
-	        }).subscribe(function (x) {
-	            _this.current_values.next(x);
-	        });
 	        this.remote_ranges_stream.map(function (x) {
 	            return _this.params.load_data(x[0], x[x.length - 1]);
 	        })
@@ -104,11 +101,18 @@
 	            return Rx.Observable.fromPromise(promise);
 	        }).subscribe(function (x) {
 	            x.subscribe(function (x) {
-	                remotes.next(_.map(x, function (val) { return "remote " + val; }));
+	                remotes.next(_.map(x, function (val) {
+	                    var res = "remote " + val;
+	                    _this.cache[val] = res;
+	                    return res;
+	                }));
 	            });
 	        });
+	        Rx.Observable.combineLatest(cached, remotes, function (cache, remote) {
+	            return _.map(cache, function (c, i) { return remote[i] ? remote[i] : cache[i]; });
+	        }).subscribe(function (x) { return _this.current_values.next(x); });
 	        this.current_values.subscribe(function (x) {
-	            console.log(" current " + x);
+	            console.log("current: " + x);
 	        });
 	    }
 	    Cursor.prototype.setIndex = function (new_index) {
@@ -124,8 +128,9 @@
 	    left_buf: 3,
 	    right_buf: 2,
 	    load_data: function (from, to) {
-	        console.log(from, to);
-	        return $.Deferred().resolve(_.range(from, to + 1)).promise();
+	        var $deferred = $.Deferred();
+	        setTimeout(function () { $deferred.resolve(_.range(from, to)); }, 500);
+	        return $deferred.promise();
 	    }
 	});
 	cursor.setIndex(0);
@@ -135,17 +140,9 @@
 	var right_obs = Rx.Observable.fromEvent($right_btn, "click");
 	var left_sub = left_obs.subscribe(function (x) {
 	    cursor.setIndex(cursor.getIndex() - 1);
-	}, function (err) {
-	    console.log('Error: %s', err);
-	}, function () {
-	    console.log('Completed');
 	});
 	var right_sub = right_obs.subscribe(function (x) {
 	    cursor.setIndex(cursor.getIndex() + 1);
-	}, function (err) {
-	    console.log('Error: %s', err);
-	}, function () {
-	    console.log('Completed');
 	});
 
 
