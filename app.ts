@@ -16,6 +16,8 @@ interface CursorParams {
 interface CursorItem {
   index: number;
   item: string;
+  loaded?: boolean;
+  cached?: boolean;
 }
 
 /**
@@ -61,31 +63,47 @@ class Cursor {
 
 
     let cached = this.range_stream.map((x: number[]) => {
-      
-      console.log(x)
       return _.map(_.range(x[0], x[1]) ,(x) => {
-        if(this.cache[x]) {
-          return `cached: ${this.cache[x]}`;
+        if(this.cache[x] && this.cache[x].loaded) {
+          return this.cache[x];
         }
         
-        return undefined;
+        return { index: x, value: "" , loaded: false };
       });
     });
     
     let remotes = new Rx.Subject<string[]>();
     
     this.remote_ranges_stream.map((x: number[]) => {
-      return this.params.load_data(x[0], x[x.length - 1]);
+      return { 
+        promise: this.params.load_data(x[0], x[x.length - 1]),
+        range: x
+      }
     })
-      .map((promise: JQueryPromise<number[]>) => {
-        return Rx.Observable.fromPromise(promise);
+      .map((value) => {
+        let newPromise = value.promise.then((values) => {
+          let range = _.range(value.range[0], value.range[1]);
+          
+          let res = {};
+          
+          return _.each(values, (val, i) => {
+            res[range[i]] = {
+              index: range[i],
+              item: `remote ${val}`
+            }
+ 
+          })          
+        });
+        
+        
+        return Rx.Observable.fromPromise(newPromise);
       }).subscribe((x) => {
         x.subscribe((x) => {
           remotes.next(      
             _.map(x, (val) => {
               let res = `remote ${val}`
-              this.cache[val] = res;
-               return res
+              this.cache[val] = {index: val , item: res, loaded: true};
+               return this.cache[val];
               })
           );
         }});
@@ -94,14 +112,19 @@ class Cursor {
             Rx.Observable.combineLatest(
       cached,
       remotes,
-      (cache, remote) => {        
+      (cache, remote) => {   
+        
+        console.log("remote", this.current_index, remote);
+        console.log("cache",this.current_index, cache)  
+           
        return _.map( cache, (c, i) => remote[i]? remote[i] : cache[i]); 
       }).subscribe((x) => this.current_values.next(x))
         
-        
-        
+    
+    
         this.current_values.subscribe((x) => {
-          console.log(`current: ${x}`);
+          console.log(this.cache)
+          console.log(x);
         })
   }
 
@@ -113,7 +136,7 @@ class Cursor {
     return this.current_index;
   }
 
-  private cache: string[] = [];
+  private cache: {[key: number] : CursorItem } = [];
 
   private chunk_stream;
   private range_stream;
@@ -131,13 +154,13 @@ class Cursor {
 
 
 var cursor = new Cursor({
-  size: 2,
-  left_buf: 3,
-  right_buf: 2,
+  size: 1,
+  left_buf: 2,
+  right_buf: 1,
   load_data: (from: number, to: number) => {
     let $deferred = $.Deferred<number[]>(); 
     
-    setTimeout(() => { $deferred.resolve(_.range(from, to)); }, 500);
+    setTimeout(() => { $deferred.resolve(_.range(from, to)); }, 1000);
     
     return $deferred.promise();
   }

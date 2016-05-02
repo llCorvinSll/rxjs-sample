@@ -85,34 +85,49 @@
 	            _this.remote_ranges_stream.next(x);
 	        });
 	        var cached = this.range_stream.map(function (x) {
-	            console.log(x);
 	            return _.map(_.range(x[0], x[1]), function (x) {
-	                if (_this.cache[x]) {
-	                    return "cached: " + _this.cache[x];
+	                if (_this.cache[x] && _this.cache[x].loaded) {
+	                    return _this.cache[x];
 	                }
-	                return undefined;
+	                return { index: x, value: "", loaded: false };
 	            });
 	        });
 	        var remotes = new Rx.Subject();
 	        this.remote_ranges_stream.map(function (x) {
-	            return _this.params.load_data(x[0], x[x.length - 1]);
+	            return {
+	                promise: _this.params.load_data(x[0], x[x.length - 1]),
+	                range: x
+	            };
 	        })
-	            .map(function (promise) {
-	            return Rx.Observable.fromPromise(promise);
+	            .map(function (value) {
+	            var newPromise = value.promise.then(function (values) {
+	                var range = _.range(value.range[0], value.range[1]);
+	                var res = {};
+	                return _.each(values, function (val, i) {
+	                    res[range[i]] = {
+	                        index: range[i],
+	                        item: "remote " + val
+	                    };
+	                });
+	            });
+	            return Rx.Observable.fromPromise(newPromise);
 	        }).subscribe(function (x) {
 	            x.subscribe(function (x) {
 	                remotes.next(_.map(x, function (val) {
 	                    var res = "remote " + val;
-	                    _this.cache[val] = res;
-	                    return res;
+	                    _this.cache[val] = { index: val, item: res, loaded: true };
+	                    return _this.cache[val];
 	                }));
 	            });
 	        });
 	        Rx.Observable.combineLatest(cached, remotes, function (cache, remote) {
+	            console.log("remote", _this.current_index, remote);
+	            console.log("cache", _this.current_index, cache);
 	            return _.map(cache, function (c, i) { return remote[i] ? remote[i] : cache[i]; });
 	        }).subscribe(function (x) { return _this.current_values.next(x); });
 	        this.current_values.subscribe(function (x) {
-	            console.log("current: " + x);
+	            console.log(_this.cache);
+	            console.log(x);
 	        });
 	    }
 	    Cursor.prototype.setIndex = function (new_index) {
@@ -124,12 +139,12 @@
 	    return Cursor;
 	}());
 	var cursor = new Cursor({
-	    size: 2,
-	    left_buf: 3,
-	    right_buf: 2,
+	    size: 1,
+	    left_buf: 2,
+	    right_buf: 1,
 	    load_data: function (from, to) {
 	        var $deferred = $.Deferred();
-	        setTimeout(function () { $deferred.resolve(_.range(from, to)); }, 500);
+	        setTimeout(function () { $deferred.resolve(_.range(from, to)); }, 1000);
 	        return $deferred.promise();
 	    }
 	});
