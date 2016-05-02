@@ -76,13 +76,18 @@
 	            return [left_side >= 0 ? left_side : 0, right_side];
 	        });
 	        this.range_stream.map(function (x) {
-	            return _.chain(_.range(x[0], x[1])).filter(function (index) {
+	            var res = _
+	                .chain(_.range(x[0], x[1] + 1))
+	                .filter(function (index) {
 	                return _.isUndefined(_this.cache[index]);
-	            }).sortBy(function (a) { return a; }).compact().value();
+	            })
+	                .sortBy(function (a) { return a; })
+	                .value();
+	            return res;
 	        })
 	            .filter(function (x) { return x.length; })
 	            .subscribe(function (x) {
-	            _this.remote_ranges_stream.next(x);
+	            _this.remote_ranges_stream.next([x[0], x[x.length - 1]]);
 	        });
 	        var cached = this.range_stream.map(function (x) {
 	            return _.map(_.range(x[0], x[1]), function (x) {
@@ -106,7 +111,7 @@
 	                return _.each(values, function (val, i) {
 	                    res[range[i]] = {
 	                        index: range[i],
-	                        item: "remote " + val
+	                        item: "item " + val,
 	                    };
 	                });
 	            });
@@ -121,14 +126,13 @@
 	            });
 	        });
 	        Rx.Observable.combineLatest(cached, remotes, function (cache, remote) {
-	            console.log("remote", _this.current_index, remote);
-	            console.log("cache", _this.current_index, cache);
-	            return _.map(cache, function (c, i) { return remote[i] ? remote[i] : cache[i]; });
+	            return _
+	                .map(cache, function (c, i) {
+	                var index = c.index;
+	                var finded = _.find(remote, { index: index });
+	                return finded ? finded : c;
+	            });
 	        }).subscribe(function (x) { return _this.current_values.next(x); });
-	        this.current_values.subscribe(function (x) {
-	            console.log(_this.cache);
-	            console.log(x);
-	        });
 	    }
 	    Cursor.prototype.setIndex = function (new_index) {
 	        this.index_stream.next(new_index);
@@ -139,12 +143,12 @@
 	    return Cursor;
 	}());
 	var cursor = new Cursor({
-	    size: 1,
-	    left_buf: 2,
-	    right_buf: 1,
-	    load_data: function (from, to) {
+	    size: 5,
+	    left_buf: 5,
+	    right_buf: 5,
+	    load_data: function (frm, to) {
 	        var $deferred = $.Deferred();
-	        setTimeout(function () { $deferred.resolve(_.range(from, to)); }, 1000);
+	        setTimeout(function () { $deferred.resolve(_.range(frm, to)); }, 3000);
 	        return $deferred.promise();
 	    }
 	});
@@ -158,6 +162,14 @@
 	});
 	var right_sub = right_obs.subscribe(function (x) {
 	    cursor.setIndex(cursor.getIndex() + 1);
+	});
+	var $cont = $("#out");
+	cursor.current_values.subscribe(function (x) {
+	    $cont.empty();
+	    _.each(x, function (val) {
+	        var selected = val.index === cursor.getIndex();
+	        $cont.append("<p> " + val.index + " - " + val.item + " : loaded " + val.loaded + " " + (selected ? "+++" : "") + " </p>");
+	    });
 	});
 
 
