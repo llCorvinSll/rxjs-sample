@@ -1,0 +1,25 @@
+{
+  "name": "rxjs-sample",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bundle.js",
+  "dependencies": {
+    "jquery": "^2.2.3",
+    "rxjs": "^5.0.0-beta.8",
+    "underscore": "^1.8.3"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/llCorvinSll/rxjs-sample.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/llCorvinSll/rxjs-sample/issues"
+  },
+  "homepage": "https://github.com/llCorvinSll/rxjs-sample#readme"
+}
