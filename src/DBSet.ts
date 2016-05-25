@@ -28,8 +28,6 @@ export default class DBSet<T> {
 
         this.setupRanges();
 
-        let remotes = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
-
         let cached = this.range_stream.map((x: number[]) => {
             return _.map(_.range(x[0], x[1]), (x: number) => {
                 if (this.cache[x] && this.cache[x].loaded) {
@@ -44,19 +42,23 @@ export default class DBSet<T> {
             });
         });
 
-
+        let remotes = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
         remotes.combineLatest(
             cached,
-            (remote, cache) => {
+            this.range_stream,
+            (remote, cache, range) => {
+                console.log(range, remote, cache);
+
                 return _
                     .map(cache, (c) => {
                         let finded = _.find(remote, { index: c.index });
 
                         return finded ? finded : c;
                     });
-            }).subscribe((x) => {
-            this.current_values.next(x);
-        });
+            })
+            .subscribe((x) => {
+                this.current_values.next(x);
+            });
 
         this.remote_ranges_stream.map((x: number[]) => {
             return {
@@ -84,7 +86,7 @@ export default class DBSet<T> {
             .subscribe((x) => {
                 remotes.next(
                     _.map(x, (val) => {
-                        let res = `remote ${val}`;
+                        let res = `${val}`;
                         this.cache[val] = {
                             index: val,
                             item: res,

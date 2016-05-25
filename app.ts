@@ -11,7 +11,7 @@ var cursor = new DBSet<string>({
     load_data: (frm: number, to: number) => {
         let $deferred = $.Deferred<string[]>();
 
-        setTimeout(() => { $deferred.resolve(_.range(frm, to).map((e) => e.toString())); }, 1000);
+        setTimeout(() => { $deferred.resolve(_.range(frm, to).map((e) => `remote ${e}`)); }, 500);
 
         return $deferred.promise();
     }
