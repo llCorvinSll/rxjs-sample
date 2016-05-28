@@ -11,7 +11,7 @@ var cursor = new DBSet<string>({
     load_data: (frm: number, to: number) => {
         let $deferred = $.Deferred<string[]>();
 
-        setTimeout(() => { $deferred.resolve(_.range(frm, to).map((e) => `remote ${e}`)); }, 500);
+        setTimeout(() => { $deferred.resolve(_.range(frm, to).map((e) => `remote ${e}`)); }, 2000);
 
         return $deferred.promise();
     }
@@ -43,9 +43,8 @@ cursor.current_values.subscribe((x:CursorItem<string>[]) => {
     $cont.append(`<h1> ${cursor.index.getValue()} </h1>`)
 
     _.each(x, (val) => {
-        let selected = val.index.toString() == cursor.index.getValue();
+        let selected = val.index === cursor.index.getValue();
 
-        $cont.append(`<p> ${val.index} - ${val.item} : loaded ${val.loaded} ${selected ? "+++" : ""} </p>`)
+        $cont.append(`<p> ${val.index} - ${val.item} : state ${val.state} ${selected ? "+++" : ""} </p>`)
     });
-
 });
