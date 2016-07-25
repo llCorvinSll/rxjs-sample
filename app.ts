@@ -23,7 +23,6 @@ var cursor = new DBSet<string>({
         return $deferred.promise();
     }
 });
-cursor.index.next(0);
 
 var $left_btn = $("#left-btn")
 var $right_btn = $("#right-btn")
@@ -33,12 +32,12 @@ var right_obs = Rx.Observable.fromEvent($right_btn, "click");
 
 var left_sub = left_obs.subscribe(
     (x) => {
-        cursor.index.next(cursor.getIndex() - 1);
+        cursor.setIndex(cursor.getIndex() - 1);
     });
 
 var right_sub = right_obs.subscribe(
     (x) => {
-        cursor.index.next(cursor.getIndex() + 1);
+        cursor.setIndex(cursor.getIndex() + 1);
     });
 
 

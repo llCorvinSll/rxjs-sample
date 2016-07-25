@@ -23,6 +23,21 @@ export interface CursorItem<T> {
 
 }
 
+
+interface CursorState {
+    index: number;
+    real_index: number;
+    full_loaded: boolean;
+    total: number;
+}
+
+interface Range {
+    begin: number;
+    end: number;
+}
+
+
+
 /**
  * Cursor
  */
@@ -34,19 +49,19 @@ export default class DBSet<T> {
         this.remote_ranges_stream = new Rx.Subject<number[]>();
         this.remote_chunks = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
 
-        this.setupIndexes();
+        this.setupState();
         this.setupRanges();
 
         let cached = this
             .range_stream
-            .map((x: number[]) => {
-                return _.compact(_.map(_.range(x[0], x[1]), (x: number) => {
+            .map((x: Range) => {
+                return _.compact(_.map(_.range(x.begin, x.end), (x: number) => {
                     if (this.cache[x]) {
                         this.cache[x].state = ItemState.CACHED;
                         return this.cache[x];
                     }
 
-                    if (!this.full_loaded) {
+                    if (!this.isFullLoaded()) {
                         return {
                             index: x,
                             item: null,
@@ -67,7 +82,7 @@ export default class DBSet<T> {
                         return finded ? finded : c;
                     });
 
-                if (this.full_loaded) {
+                if (this.isFullLoaded()) {
                     zipped_set = _.filter(zipped_set, (item: CursorItem<T>) => item.state !== ItemState.LOADING);
                 }
 
@@ -84,13 +99,15 @@ export default class DBSet<T> {
                 let newPromise: any = value.promise.then((resolved: T[]) => {
                     let res: _.Dictionary<{index:number; item: T}> = {};
 
-                    console.error(value.range);
-
                     if (resolved.length < DBSet.getRangeLength(value.range)) {
                         console.error("finish", resolved.length, DBSet.getRangeLength(value.range));
 
-                        this.total = value.range[0] + resolved.length;
-                        this.full_loaded = true;
+                        let state = this.current_state.getValue();
+
+                        this.current_state.next(_.extend({}, state, {
+                            total: value.range[0] + resolved.length,
+                            full_loaded: true,
+                        }));
                     }
 
                     _.each(resolved, (val, i) => {
@@ -119,68 +136,83 @@ export default class DBSet<T> {
             });
     }
 
-    public getIndex(): number {
-        return this.real_index.getValue();
+    public setIndex(index: number): void {
+        let value = this.current_state.getValue();
+
+        this.current_state.next(_.extend({}, value, {
+            index: index
+        }));
     }
 
-    public index: Rx.BehaviorSubject<number>;
+    public getIndex(): number {
+        return this.current_state.getValue().real_index;
+    }
 
-    private real_index: Rx.BehaviorSubject<number>;
+    protected static recalculateIndex(state: CursorState): CursorState {
+        let new_state = state;
 
+        if (!state.full_loaded) {
+            new_state.real_index = new_state.index;
 
-    protected setupIndexes() {
-        this.index = new Rx.BehaviorSubject<number>(0);
-        this.real_index = new Rx.BehaviorSubject<number>(0);
+            return new_state;
+        }
 
-        this.index.subscribe((x: number) => {
-            if (!this.full_loaded) {
-                this.real_index.next(x)
+        if (state.index >= state.total) {
+            new_state.real_index = state.total - 1;
+            return new_state;
+        }
 
-                return;
-            }
+        new_state.real_index = state.index;
 
-            if (x > this.total) {
-                this.real_index.next(this.total);
-                return;
-            }
+        return new_state;
+    }
 
-            this.real_index.next(x);
+    protected setupState(): void {
+        this.current_state = new Rx.BehaviorSubject<CursorState>({
+            index: 0,
+            real_index: 0,
+            full_loaded: false,
+            total: 0
         });
     }
 
-    
     protected setupRanges():void {
-        this.chunk_stream = this.real_index
-            .filter((x) => this.filterIndex(x))
-            .map((x) => {
-                return (Math.floor(x / (this.params.size)));
+        this.chunk_stream = this
+            .current_state
+            .map(DBSet.recalculateIndex)
+            .distinctUntilChanged()
+            .map((x: CursorState) => {
+                return (Math.floor(x.real_index / (this.params.size)));
             });
 
-        this.range_stream = this.chunk_stream
+        this.range_stream = this
+            .chunk_stream
             .map((x) => {
-            let chunk_len = this.params.size;
+                let chunk_len = this.params.size;
+                let left_side = chunk_len * x - this.params.left_buf;
+                let right_side = chunk_len * (x + 1) + this.params.right_buf;
 
-            let left_side = chunk_len * x - this.params.left_buf;
-            let right_side = chunk_len * (x + 1) + this.params.right_buf;
-
-            return [left_side >= 0 ? left_side : 0, right_side];
+                return {
+                    begin: left_side >= 0 ? left_side : 0,
+                    end: right_side,
+                };
         });
 
         this.range_stream
             .distinctUntilChanged()
-            .map((x: number[]) => {
+            .map((x: Range) => {
             return _
-                .chain<number>(_.range(x[0], x[1] + 1))
+                .chain<number>(_.range(x.begin, x.end))
                 .filter((index: number) => {
                     return _.isUndefined(this.cache[index]);
                 })
                 .uniq()
                 .sortBy(a => a)
                 .value();
-        })
+            })
             .filter(x => x.length > 1)
             .subscribe((x) => {
-                if (this.full_loaded) {
+                if (this.current_state.getValue().full_loaded) {
                     return;
                 }
 
@@ -195,15 +227,6 @@ export default class DBSet<T> {
         };
     }
 
-    protected filterIndex(index: number): boolean {
-        if (!this.full_loaded) {
-            return index >= 0;
-        }
-
-
-        return index < this.total;
-    }
-
     private static getRangeLength(indexes: number[]): number {
         return indexes[indexes.length - 1] - indexes[0] + 1;
     }
@@ -212,16 +235,21 @@ export default class DBSet<T> {
         return a[0] === b[0] && a[1] === b[1];
     }
 
+    private isFullLoaded(): boolean {
+        return this.current_state.getValue().full_loaded;
+    }
+
     public current_values: Rx.BehaviorSubject<CursorItem<T>[]>;
+
+    private current_state: Rx.BehaviorSubject<CursorState>;
 
     private cache: { [key: number]: CursorItem<T> } = [];
 
-    private chunk_stream;
-    private range_stream;
-    private remote_chunks:Rx.BehaviorSubject<CursorItem<T>[]>;
+    private chunk_stream: Rx.Observable<number>;
 
-    private full_loaded: boolean = false;
-    private total: number = null;
+    private range_stream: Rx.Observable<Range>;
+
+    private remote_chunks; //:Rx.BehaviorSubject<CursorItem<T>[]>;
 
     private remote_ranges_stream: Rx.Subject<number[]>;
 
