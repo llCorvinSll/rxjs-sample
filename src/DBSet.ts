@@ -36,8 +36,6 @@ interface Range {
     end: number;
 }
 
-
-
 /**
  * Cursor
  */
@@ -45,8 +43,8 @@ export default class DBSet<T> {
     constructor(options: CursorParams<T>) {
         this.params = options;
         this.current_values = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
+        this.remote_ranges_stream = new Rx.Subject<Range>();
 
-        this.remote_ranges_stream = new Rx.Subject<number[]>();
         this.remote_chunks = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
 
         this.setupState();
@@ -94,7 +92,7 @@ export default class DBSet<T> {
 
         this.remote_ranges_stream
             .distinctUntilChanged(DBSet.rangesComparator)
-            .map((x: number[]) => this.startRemoteLoading(x))
+            .map((x: Range) => this.startRemoteLoading(x))
             .flatMap((value) => {
                 let newPromise: any = value.promise.then((resolved: T[]) => {
                     let res: _.Dictionary<{index:number; item: T}> = {};
@@ -148,25 +146,6 @@ export default class DBSet<T> {
         return this.current_state.getValue().real_index;
     }
 
-    protected static recalculateIndex(state: CursorState): CursorState {
-        let new_state = state;
-
-        if (!state.full_loaded) {
-            new_state.real_index = new_state.index;
-
-            return new_state;
-        }
-
-        if (state.index >= state.total) {
-            new_state.real_index = state.total - 1;
-            return new_state;
-        }
-
-        new_state.real_index = state.index;
-
-        return new_state;
-    }
-
     protected setupState(): void {
         this.current_state = new Rx.BehaviorSubject<CursorState>({
             index: 0,
@@ -211,32 +190,54 @@ export default class DBSet<T> {
                 .value();
             })
             .filter(x => x.length > 1)
-            .subscribe((x) => {
+            .subscribe((x: number[]) => {
                 if (this.current_state.getValue().full_loaded) {
                     return;
                 }
 
-                this.remote_ranges_stream.next([x[0], x[x.length - 1]]);
+                this.remote_ranges_stream.next({
+                    begin: x[0],
+                    end: x[x.length - 1]
+                });
             });
     }
 
-    protected startRemoteLoading(x: number[]): {promise: JQueryPromise<T[]>; range: number[]} {
+    protected startRemoteLoading(x: Range): {promise: JQueryPromise<T[]>; range: number[]} {
         return {
-            promise: this.params.load_data(x[0], x[x.length - 1]),
-            range: _.range(x[0], x[1])
+            promise: this.params.load_data(x.begin, x.end),
+            range: _.range(x.begin, x.end)
         };
+    }
+
+    protected isFullLoaded(): boolean {
+        return this.current_state.getValue().full_loaded;
     }
 
     private static getRangeLength(indexes: number[]): number {
         return indexes[indexes.length - 1] - indexes[0] + 1;
     }
 
-    private static rangesComparator(a:number[], b:number[]) {
-        return a[0] === b[0] && a[1] === b[1];
+    private static rangesComparator(a: Range, b: Range) {
+        return a.begin === b.begin && a.end === b.end;
     }
 
-    private isFullLoaded(): boolean {
-        return this.current_state.getValue().full_loaded;
+    protected static recalculateIndex(state: CursorState): CursorState {
+        let new_state = state;
+
+        if (!state.full_loaded) {
+            new_state.real_index = new_state.index;
+
+            return new_state;
+        }
+
+        if (state.index >= state.total) {
+            new_state.real_index = state.total - 1;
+            return new_state;
+        }
+
+        new_state.real_index = state.index;
+
+        return new_state;
     }
 
     public current_values: Rx.BehaviorSubject<CursorItem<T>[]>;
@@ -251,7 +252,7 @@ export default class DBSet<T> {
 
     private remote_chunks; //:Rx.BehaviorSubject<CursorItem<T>[]>;
 
-    private remote_ranges_stream: Rx.Subject<number[]>;
+    private remote_ranges_stream: Rx.Subject<Range>;
 
     private params: CursorParams<T>;
 }
