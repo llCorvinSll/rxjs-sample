@@ -30,39 +30,48 @@ export default class DBSet<T> {
     constructor(options: CursorParams<T>) {
         this.params = options;
         this.current_values = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
-        this.index = new Rx.BehaviorSubject<number>(0);
+
         this.remote_ranges_stream = new Rx.Subject<number[]>();
         this.remote_chunks = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
 
+        this.setupIndexes();
         this.setupRanges();
 
         let cached = this
             .range_stream
             .map((x: number[]) => {
-                return _.map(_.range(x[0], x[1]), (x: number) => {
+                return _.compact(_.map(_.range(x[0], x[1]), (x: number) => {
                     if (this.cache[x]) {
                         this.cache[x].state = ItemState.CACHED;
                         return this.cache[x];
                     }
 
-                    return {
-                        index: x,
-                        item: null,
-                        state: ItemState.LOADING
-                    };
-            });
+                    if (!this.full_loaded) {
+                        return {
+                            index: x,
+                            item: null,
+                            state: ItemState.LOADING
+                        };
+                    }
+                }));
         });
 
         this.remote_chunks
             .combineLatest(
             cached.distinctUntilChanged(),
             (remote, cache) => {
-                return _
+                let zipped_set = _
                     .map(cache as _.Dictionary<CursorItem<T>>, (c) => {
                         let finded = _.find(remote, { index: c.index });
 
                         return finded ? finded : c;
                     });
+
+                if (this.full_loaded) {
+                    zipped_set = _.filter(zipped_set, (item: CursorItem<T>) => item.state !== ItemState.LOADING);
+                }
+
+                return zipped_set;
             })
             .subscribe((x) => {
                 this.current_values.next(x);
@@ -110,10 +119,38 @@ export default class DBSet<T> {
             });
     }
 
+    public getIndex(): number {
+        return this.real_index.getValue();
+    }
+
     public index: Rx.BehaviorSubject<number>;
+
+    private real_index: Rx.BehaviorSubject<number>;
+
+
+    protected setupIndexes() {
+        this.index = new Rx.BehaviorSubject<number>(0);
+        this.real_index = new Rx.BehaviorSubject<number>(0);
+
+        this.index.subscribe((x: number) => {
+            if (!this.full_loaded) {
+                this.real_index.next(x)
+
+                return;
+            }
+
+            if (x > this.total) {
+                this.real_index.next(this.total);
+                return;
+            }
+
+            this.real_index.next(x);
+        });
+    }
+
     
     protected setupRanges():void {
-        this.chunk_stream = this.index
+        this.chunk_stream = this.real_index
             .filter((x) => this.filterIndex(x))
             .map((x) => {
                 return (Math.floor(x / (this.params.size)));
@@ -164,8 +201,7 @@ export default class DBSet<T> {
         }
 
 
-
-        return index <= this.total;
+        return index < this.total;
     }
 
     private static getRangeLength(indexes: number[]): number {
@@ -186,7 +222,6 @@ export default class DBSet<T> {
 
     private full_loaded: boolean = false;
     private total: number = null;
-    private real_index: number = 0;
 
     private remote_ranges_stream: Rx.Subject<number[]>;
 

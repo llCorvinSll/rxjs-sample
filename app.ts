@@ -33,12 +33,12 @@ var right_obs = Rx.Observable.fromEvent($right_btn, "click");
 
 var left_sub = left_obs.subscribe(
     (x) => {
-        cursor.index.next(cursor.index.getValue() - 1);
+        cursor.index.next(cursor.getIndex() - 1);
     });
 
 var right_sub = right_obs.subscribe(
     (x) => {
-        cursor.index.next(cursor.index.getValue() + 1);
+        cursor.index.next(cursor.getIndex() + 1);
     });
 
 
@@ -47,10 +47,10 @@ let $cont = $("#out");
 cursor.current_values.subscribe((x:CursorItem<string>[]) => {
     $cont.empty();
 
-    $cont.append(`<h1> ${cursor.index.getValue()} </h1>`)
+    $cont.append(`<h1> ${cursor.getIndex()} </h1>`)
 
     _.each(x, (val) => {
-        let selected = val.index === cursor.index.getValue();
+        let selected = val.index === cursor.getIndex();
 
         $cont.append(`<p> ${val.index} - ${val.item} : state ${ItemState[val.state]} ${selected ? "+++" : ""} </p>`)
     });
