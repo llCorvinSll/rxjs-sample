@@ -36,22 +36,25 @@ export default class DBSet<T> {
 
         this.setupRanges();
 
-        let cached = this.range_stream.map((x: number[]) => {
-            return _.map(_.range(x[0], x[1]), (x: number) => {
-                if (this.cache[x]) {
-                    this.cache[x].state = ItemState.CACHED;
-                    return this.cache[x];
-                }
+        let cached = this
+            .range_stream
+            .map((x: number[]) => {
+                return _.map(_.range(x[0], x[1]), (x: number) => {
+                    if (this.cache[x]) {
+                        this.cache[x].state = ItemState.CACHED;
+                        return this.cache[x];
+                    }
 
-                return {
-                    index: x,
-                    item: null,
-                    state: ItemState.LOADING
-                };
+                    return {
+                        index: x,
+                        item: null,
+                        state: ItemState.LOADING
+                    };
             });
         });
 
-        this.remote_chunks.combineLatest(
+        this.remote_chunks
+            .combineLatest(
             cached.distinctUntilChanged(),
             (remote, cache) => {
                 return _
@@ -67,17 +70,21 @@ export default class DBSet<T> {
 
         this.remote_ranges_stream
             .distinctUntilChanged(DBSet.rangesComparator)
-            .map((x: number[]) => {
-            return {
-                promise: this.params.load_data(x[0], x[x.length - 1]),
-                range: _.range(x[0], x[1])
-            }
-        })
+            .map((x: number[]) => this.startRemoteLoading(x))
             .flatMap((value) => {
-                let newPromise:any = value.promise.then((values) => {
+                let newPromise: any = value.promise.then((resolved: T[]) => {
                     let res: _.Dictionary<{index:number; item: T}> = {};
 
-                    _.each(values, (val, i) => {
+                    console.error(value.range);
+
+                    if (resolved.length < DBSet.getRangeLength(value.range)) {
+                        console.error("finish", resolved.length, DBSet.getRangeLength(value.range));
+
+                        this.total = value.range[0] + resolved.length;
+                        this.full_loaded = true;
+                    }
+
+                    _.each(resolved, (val, i) => {
                         res[value.range[i]] = {
                             index: value.range[i],
                             item: val,
@@ -107,7 +114,7 @@ export default class DBSet<T> {
     
     protected setupRanges():void {
         this.chunk_stream = this.index
-            .filter((x) => x >= 0)
+            .filter((x) => this.filterIndex(x))
             .map((x) => {
                 return (Math.floor(x / (this.params.size)));
             });
@@ -136,8 +143,33 @@ export default class DBSet<T> {
         })
             .filter(x => x.length > 1)
             .subscribe((x) => {
+                if (this.full_loaded) {
+                    return;
+                }
+
                 this.remote_ranges_stream.next([x[0], x[x.length - 1]]);
             });
+    }
+
+    protected startRemoteLoading(x: number[]): {promise: JQueryPromise<T[]>; range: number[]} {
+        return {
+            promise: this.params.load_data(x[0], x[x.length - 1]),
+            range: _.range(x[0], x[1])
+        };
+    }
+
+    protected filterIndex(index: number): boolean {
+        if (!this.full_loaded) {
+            return index >= 0;
+        }
+
+
+
+        return index <= this.total;
+    }
+
+    private static getRangeLength(indexes: number[]): number {
+        return indexes[indexes.length - 1] - indexes[0] + 1;
     }
 
     private static rangesComparator(a:number[], b:number[]) {
@@ -151,6 +183,10 @@ export default class DBSet<T> {
     private chunk_stream;
     private range_stream;
     private remote_chunks:Rx.BehaviorSubject<CursorItem<T>[]>;
+
+    private full_loaded: boolean = false;
+    private total: number = null;
+    private real_index: number = 0;
 
     private remote_ranges_stream: Rx.Subject<number[]>;
 

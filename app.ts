@@ -1,17 +1,24 @@
 import * as Rx from "rxjs/Rx";
 import * as $ from "jquery";
 import * as _ from "underscore";
-import {CursorItem, default as DBSet} from "./src/DBSet";
+import {CursorItem, default as DBSet, ItemState} from "./src/DBSet";
 
+var MAX_SIZE = 15;
 
 var cursor = new DBSet<string>({
-    size: 5,
-    left_buf: 5,
-    right_buf: 5,
+    size: 3,
+    left_buf: 3,
+    right_buf: 3,
     load_data: (frm: number, to: number) => {
         let $deferred = $.Deferred<string[]>();
 
-        setTimeout(() => { $deferred.resolve(_.range(frm, to).map((e) => `remote ${e}`)); }, 2000);
+        if (to > MAX_SIZE) {
+            to = MAX_SIZE;
+        }
+
+        setTimeout(() => {
+            $deferred.resolve(_.range(frm, to).map((e) => `remote ${e}`));
+        }, 1000);
 
         return $deferred.promise();
     }
@@ -45,6 +52,6 @@ cursor.current_values.subscribe((x:CursorItem<string>[]) => {
     _.each(x, (val) => {
         let selected = val.index === cursor.index.getValue();
 
-        $cont.append(`<p> ${val.index} - ${val.item} : state ${val.state} ${selected ? "+++" : ""} </p>`)
+        $cont.append(`<p> ${val.index} - ${val.item} : state ${ItemState[val.state]} ${selected ? "+++" : ""} </p>`)
     });
 });
