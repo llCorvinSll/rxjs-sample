@@ -6,6 +6,8 @@ export interface CursorParams<T> {
     left_buf: number;
     right_buf: number;
 
+    cyclic: boolean;
+
     load_data: (from: number, to: number) => JQueryPromise<T[]>
 }
 
@@ -29,6 +31,7 @@ interface CursorState {
     real_index: number;
     full_loaded: boolean;
     total: number;
+    cyclic: boolean;
 }
 
 interface Range {
@@ -156,7 +159,8 @@ export default class DBSet<T> {
             index: 0,
             real_index: 0,
             full_loaded: false,
-            total: 0
+            total: 0,
+            cyclic: this.params.cyclic
         });
     }
 
@@ -227,18 +231,33 @@ export default class DBSet<T> {
     protected static recalculateIndex(state: CursorState): CursorState {
         let new_state = state;
 
-        if (!state.full_loaded) {
-            new_state.real_index = new_state.index;
-
-            return new_state;
+        if (state.cyclic && state.full_loaded) {
+            //Сделано для того, чтобы при любых value новое значение было в диапазоне [0, total)
+            //Если сделать (total + value) % total, то при value < 0 и |value| > total будет неправильное значение
+            if (state.index < 0) {
+                new_state.real_index = (state.total + state.index % state.total) % state.total;
+            } else {
+                new_state.real_index = state.index % state.total;
+            }
+        } else {
+            new_state.real_index = Math.max(state.index, 0);
+            if (state.total) {
+                new_state.real_index = Math.min(state.index, state.total ? state.total - 1 : 0);
+            }
         }
 
-        if (state.index >= state.total) {
-            new_state.real_index = state.total - 1;
-            return new_state;
-        }
-
-        new_state.real_index = state.index;
+        // if (!state.full_loaded) {
+        //     new_state.real_index = new_state.index;
+        //
+        //     return new_state;
+        // }
+        //
+        // if (state.index >= state.total) {
+        //     new_state.real_index = state.total - 1;
+        //     return new_state;
+        // }
+        //
+        // new_state.real_index = state.index;
 
         return new_state;
     }

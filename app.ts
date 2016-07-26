@@ -9,6 +9,9 @@ var cursor = new DBSet<string>({
     size: 3,
     left_buf: 3,
     right_buf: 3,
+
+    cyclic: true,
+
     load_data: (frm: number, to: number) => {
         console.error(`frm[${frm}] to[${to}]`)
 
