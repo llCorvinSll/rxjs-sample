@@ -10,15 +10,17 @@ var cursor = new DBSet<string>({
     left_buf: 3,
     right_buf: 3,
     load_data: (frm: number, to: number) => {
+        console.error(`frm[${frm}] to[${to}]`)
+
         let $deferred = $.Deferred<string[]>();
 
-        if (to > MAX_SIZE) {
-            to = MAX_SIZE;
+        if (to > MAX_SIZE - 1) {
+            to = MAX_SIZE - 1;
         }
 
         setTimeout(() => {
-            $deferred.resolve(_.range(frm, to).map((e) => `remote ${e}`));
-        }, 1000);
+            $deferred.resolve(_.range(frm, to + 1).map((e) => `remote ${e}`));
+        }, 500);
 
         return $deferred.promise();
     }

@@ -36,6 +36,11 @@ interface Range {
     end: number;
 }
 
+interface RemoteRequest<T> {
+    promise: JQueryPromise<T[]>;
+    indexes: number[];
+}
+
 /**
  * Cursor
  */
@@ -44,7 +49,6 @@ export default class DBSet<T> {
         this.params = options;
         this.current_values = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
         this.remote_ranges_stream = new Rx.Subject<Range>();
-
         this.remote_chunks = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
 
         this.setupState();
@@ -69,48 +73,25 @@ export default class DBSet<T> {
                 }));
         });
 
-        this.remote_chunks
-            .combineLatest(
-            cached.distinctUntilChanged(),
-            (remote, cache) => {
-                let zipped_set = _
-                    .map(cache as _.Dictionary<CursorItem<T>>, (c) => {
-                        let finded = _.find(remote, { index: c.index });
-
-                        return finded ? finded : c;
-                    });
-
-                if (this.isFullLoaded()) {
-                    zipped_set = _.filter(zipped_set, (item: CursorItem<T>) => item.state !== ItemState.LOADING);
-                }
-
-                return zipped_set;
-            })
-            .subscribe((x) => {
-                this.current_values.next(x);
-            });
-
         this.remote_ranges_stream
             .distinctUntilChanged(DBSet.rangesComparator)
             .map((x: Range) => this.startRemoteLoading(x))
-            .flatMap((value) => {
+            .flatMap((value: RemoteRequest<T>) => {
                 let newPromise: any = value.promise.then((resolved: T[]) => {
                     let res: _.Dictionary<{index:number; item: T}> = {};
 
-                    if (resolved.length < DBSet.getRangeLength(value.range)) {
-                        console.error("finish", resolved.length, DBSet.getRangeLength(value.range));
-
+                    if (resolved.length < DBSet.getRangeLength(value.indexes)) {
                         let state = this.current_state.getValue();
 
                         this.current_state.next(_.extend({}, state, {
-                            total: value.range[0] + resolved.length,
+                            total: value.indexes[0] + resolved.length,
                             full_loaded: true,
                         }));
                     }
 
                     _.each(resolved, (val, i) => {
-                        res[value.range[i]] = {
-                            index: value.range[i],
+                        res[value.indexes[i]] = {
+                            index: value.indexes[i],
                             item: val,
                         }
                     });
@@ -132,6 +113,30 @@ export default class DBSet<T> {
                     })
                 );
             });
+
+
+        this.remote_chunks
+            .combineLatest(
+                cached.distinctUntilChanged(),
+                (remote, cache) => {
+                    let zipped_set = _
+                        .map(cache, (c) => {
+                            let finded = _.find(remote, {index: c.index});
+
+                            return finded ? finded : c;
+                        });
+
+                    if (this.isFullLoaded()) {
+                        zipped_set = _.filter(zipped_set, (item: CursorItem<T>) => item.state !== ItemState.LOADING);
+                    }
+
+                    return zipped_set;
+                })
+            .subscribe((x) => {
+                this.current_values.next(x);
+            });
+
+        this.setIndex(0);
     }
 
     public setIndex(index: number): void {
@@ -182,9 +187,7 @@ export default class DBSet<T> {
             .map((x: Range) => {
             return _
                 .chain<number>(_.range(x.begin, x.end))
-                .filter((index: number) => {
-                    return _.isUndefined(this.cache[index]);
-                })
+                .filter((index: number) =>_.isUndefined(this.cache[index]))
                 .uniq()
                 .sortBy(a => a)
                 .value();
@@ -202,10 +205,10 @@ export default class DBSet<T> {
             });
     }
 
-    protected startRemoteLoading(x: Range): {promise: JQueryPromise<T[]>; range: number[]} {
+    protected startRemoteLoading(x: Range): RemoteRequest<T> {
         return {
             promise: this.params.load_data(x.begin, x.end),
-            range: _.range(x.begin, x.end)
+            indexes: _.range(x.begin, x.end + 1)
         };
     }
 
@@ -250,7 +253,7 @@ export default class DBSet<T> {
 
     private range_stream: Rx.Observable<Range>;
 
-    private remote_chunks; //:Rx.BehaviorSubject<CursorItem<T>[]>;
+    private remote_chunks: Rx.BehaviorSubject<CursorItem<T>[]>; // = new ([]);
 
     private remote_ranges_stream: Rx.Subject<Range>;
 
