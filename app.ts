@@ -7,8 +7,8 @@ var MAX_SIZE = 15;
 
 var cursor = new DBSet<string>({
     size: 3,
-    left_buf: 3,
-    right_buf: 3,
+    min_reserve: 3,
+    max_reserve: 3,
 
     cyclic: true,
 

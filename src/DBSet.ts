@@ -1,14 +1,17 @@
 import * as Rx from "rxjs/Rx";
 import * as _ from "underscore";
 
-export interface CursorParams<T> {
+
+interface CursorParamsBase {
     size: number;
-    left_buf: number;
-    right_buf: number;
+    min_reserve: number;
+    max_reserve: number;
 
     cyclic: boolean;
+}
 
-    load_data: (from: number, to: number) => JQueryPromise<T[]>
+export interface CursorParams<T> extends CursorParamsBase {
+    load_data: (from: number, to: number) => JQueryPromise<T[]>;
 }
 
 export enum ItemState {
@@ -16,7 +19,7 @@ export enum ItemState {
     LOADED,
     CACHED,
     FAIL,
-};
+}
 
 export interface CursorItem<T> {
     index: number;
@@ -60,30 +63,44 @@ export default class DBSet<T> {
         let cached = this
             .range_stream
             .map((x: Range) => {
-                return _.compact(_.map(_.range(x.begin, x.end), (x: number) => {
-                    if (this.cache[x]) {
-                        this.cache[x].state = ItemState.CACHED;
-                        return this.cache[x];
-                    }
+                let range = _.range(x.begin, x.end);
 
-                    if (!this.isFullLoaded()) {
-                        return {
-                            index: x,
-                            item: null,
-                            state: ItemState.LOADING
-                        };
-                    }
-                }));
+                return _
+                    .chain(range)
+                    .map((x: number) => {
+                        if (this.cache[x]) {
+                            this.cache[x].state = ItemState.CACHED;
+                            return this.cache[x];
+                        }
+
+                        if (!this.isFullLoaded()) {
+                            return {
+                                index: x,
+                                item: null,
+                                state: ItemState.LOADING
+                            };
+                        }
+                    })
+                    .compact()
+                    .value();
         });
 
-        this.remote_ranges_stream
-            .distinctUntilChanged(DBSet.rangesComparator)
+
+        let uniq_chunks = this
+            .remote_ranges_stream
+            .distinctUntilChanged(DBSet.rangesComparator);
+
+
+        uniq_chunks
             .map((x: Range) => this.startRemoteLoading(x))
             .flatMap((value: RemoteRequest<T>) => {
                 let newPromise: any = value.promise.then((resolved: T[]) => {
                     let res: _.Dictionary<{index:number; item: T}> = {};
 
                     if (resolved.length < DBSet.getRangeLength(value.indexes)) {
+
+                        console.error("asdadasdasdasd", DBSet.getRangeLength(value.indexes), resolved.length);
+
                         let state = this.current_state.getValue();
 
                         this.current_state.next(_.extend({}, state, {
@@ -140,6 +157,10 @@ export default class DBSet<T> {
             });
 
         this.setIndex(0);
+
+        this
+            .current_state
+            .subscribe((x) => console.error(x));
     }
 
     public setIndex(index: number): void {
@@ -169,19 +190,17 @@ export default class DBSet<T> {
             .current_state
             .map(DBSet.recalculateIndex)
             .distinctUntilChanged()
-            .map((x: CursorState) => {
-                return (Math.floor(x.real_index / (this.params.size)));
-            });
+            .map((x: CursorState) => Math.floor(x.real_index / (this.params.size)));
 
         this.range_stream = this
             .chunk_stream
             .map((x) => {
-                let chunk_len = this.params.size;
-                let left_side = chunk_len * x - this.params.left_buf;
-                let right_side = chunk_len * (x + 1) + this.params.right_buf;
+                let chunk_len = DBSet.calculateChunkLength(this.params);
+                let left_side = chunk_len * x;
+                let right_side = chunk_len * (x + 1);
 
                 return {
-                    begin: left_side >= 0 ? left_side : 0,
+                    begin: left_side,
                     end: right_side,
                 };
         });
@@ -189,12 +208,12 @@ export default class DBSet<T> {
         this.range_stream
             .distinctUntilChanged()
             .map((x: Range) => {
-            return _
-                .chain<number>(_.range(x.begin, x.end))
-                .filter((index: number) =>_.isUndefined(this.cache[index]))
-                .uniq()
-                .sortBy(a => a)
-                .value();
+                return _
+                    .chain<number>(_.range(x.begin, x.end))
+                    .filter((index: number) =>_.isUndefined(this.cache[index]))
+                    .uniq()
+                    .sortBy(a => a)
+                    .value();
             })
             .filter(x => x.length > 1)
             .subscribe((x: number[]) => {
@@ -209,14 +228,14 @@ export default class DBSet<T> {
             });
     }
 
-    protected startRemoteLoading(x: Range): RemoteRequest<T> {
+    private startRemoteLoading(x: Range): RemoteRequest<T> {
         return {
             promise: this.params.load_data(x.begin, x.end),
             indexes: _.range(x.begin, x.end + 1)
         };
     }
 
-    protected isFullLoaded(): boolean {
+    private isFullLoaded(): boolean {
         return this.current_state.getValue().full_loaded;
     }
 
@@ -228,7 +247,11 @@ export default class DBSet<T> {
         return a.begin === b.begin && a.end === b.end;
     }
 
-    protected static recalculateIndex(state: CursorState): CursorState {
+    private static calculateChunkLength(params: CursorParamsBase): number {
+        return params.size + (params.max_reserve * 2);
+    }
+
+    private static recalculateIndex(state: CursorState): CursorState {
         let new_state = state;
 
         if (state.cyclic && state.full_loaded) {
@@ -245,19 +268,6 @@ export default class DBSet<T> {
                 new_state.real_index = Math.min(state.index, state.total ? state.total - 1 : 0);
             }
         }
-
-        // if (!state.full_loaded) {
-        //     new_state.real_index = new_state.index;
-        //
-        //     return new_state;
-        // }
-        //
-        // if (state.index >= state.total) {
-        //     new_state.real_index = state.total - 1;
-        //     return new_state;
-        // }
-        //
-        // new_state.real_index = state.index;
 
         return new_state;
     }
