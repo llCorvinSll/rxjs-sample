@@ -51,7 +51,6 @@ export default class DBSet<T> {
     constructor(options: CursorParams<T>) {
         this.params = options;
         this.current_values = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
-        this.remote_ranges_stream = new Rx.Subject<Range>();
         this.remote_chunks = new Rx.BehaviorSubject<CursorItem<T>[]>([]);
 
         this.setupState();
@@ -60,20 +59,41 @@ export default class DBSet<T> {
         let cached = this
             .range_stream
             .map((x: Range) => {
-                return _.compact(_.map(_.range(x.begin, x.end), (x: number) => {
-                    if (this.cache[x]) {
-                        this.cache[x].state = ItemState.CACHED;
-                        return this.cache[x];
-                    }
+                let range = _.range(x.begin, x.end);
+                let expected_len = DBSet.getRangeLength(range);
 
-                    if (!this.isFullLoaded()) {
+                if (this.isFullLoaded()) {
+                    range = _.filter(range, (x: number) => {
+                        return !!this.cache[x];
+                    });
+
+                    let new_len = DBSet.getRangeLength(range);
+
+                    if (new_len < expected_len) {
+
+                        for (var i = 0; i < expected_len - new_len; i++) {
+                            range.push(i);
+                        }
+
+                    }
+                }
+
+                return _
+                    .chain(range)
+                    .map((x: number) => {
+                        if (this.cache[x]) {
+                            this.cache[x].state = ItemState.CACHED;
+                            return this.cache[x];
+                        }
+
                         return {
                             index: x,
                             item: null,
                             state: ItemState.LOADING
                         };
-                    }
-                }));
+                    })
+                    .compact()
+                    .value();
         });
 
         this.remote_ranges_stream
@@ -183,7 +203,7 @@ export default class DBSet<T> {
                 };
         });
 
-        this.range_stream
+        this.remote_ranges_stream = this.range_stream
             .distinctUntilChanged()
             .map((x: Range) => {
             return _
@@ -194,15 +214,12 @@ export default class DBSet<T> {
                 .value();
             })
             .filter(x => x.length > 1)
-            .subscribe((x: number[]) => {
-                if (this.current_state.getValue().full_loaded) {
-                    return;
-                }
-
-                this.remote_ranges_stream.next({
+            .filter(x => !this.isFullLoaded())
+            .map((x: number[]) => {
+                return {
                     begin: x[0],
                     end: x[x.length - 1]
-                });
+                };
             });
     }
 
@@ -256,7 +273,7 @@ export default class DBSet<T> {
 
     private remote_chunks: Rx.BehaviorSubject<CursorItem<T>[]>; // = new ([]);
 
-    private remote_ranges_stream: Rx.Subject<Range>;
+    private remote_ranges_stream: Rx.Observable<Range>;
 
     private params: CursorParams<T>;
 }
