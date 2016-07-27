@@ -165,16 +165,13 @@ export default class DBSet<T> {
     }
 
     protected setupRanges():void {
-        this.chunk_stream = this
+        this.range_stream = this
             .current_state
             .map(DBSet.recalculateIndex)
             .distinctUntilChanged()
             .map((x: CursorState) => {
                 return (Math.floor(x.real_index / (this.params.size)));
-            });
-
-        this.range_stream = this
-            .chunk_stream
+            })
             .map((x) => {
                 let chunk_len = this.params.size;
                 let left_side = chunk_len * x - this.params.left_buf;
@@ -246,19 +243,6 @@ export default class DBSet<T> {
             }
         }
 
-        // if (!state.full_loaded) {
-        //     new_state.real_index = new_state.index;
-        //
-        //     return new_state;
-        // }
-        //
-        // if (state.index >= state.total) {
-        //     new_state.real_index = state.total - 1;
-        //     return new_state;
-        // }
-        //
-        // new_state.real_index = state.index;
-
         return new_state;
     }
 
@@ -267,8 +251,6 @@ export default class DBSet<T> {
     private current_state: Rx.BehaviorSubject<CursorState>;
 
     private cache: { [key: number]: CursorItem<T> } = [];
-
-    private chunk_stream: Rx.Observable<number>;
 
     private range_stream: Rx.Observable<Range>;
 
