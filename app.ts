@@ -7,14 +7,14 @@ var MAX_SIZE = 15;
 
 var cursor = new DBSet<string>({
     size: 2,
-    left_buf: 2,
+    max_reserv: 2,
     right_buf: 2,
 
     cyclic: true,
     capacity: 20,
 
     load_data: (frm: number, to: number) => {
-        console.error(`frm[${frm}] to[${to}]`)
+        // console.error(`frm[${frm}] to[${to}]`);
 
         let $deferred = $.Deferred<string[]>();
 

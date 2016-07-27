@@ -3,7 +3,7 @@ import * as _ from "underscore";
 
 export interface CursorParams<T> {
     size: number;
-    left_buf: number;
+    max_reserv: number;
     right_buf: number;
 
     cyclic: boolean;
@@ -111,21 +111,16 @@ export default class DBSet<T> {
         return this
             .range_stream
             .map((x: Range) => {
-                // let range = _.range(x.begin, x.end);
-                // let expected_len = DBSet.getRangeLength(range);
-
-                // console.error(range);
-
                 let final = [];
 
+                console.error("RANGE", x);
+
                 let normalized_ranges = DBSet.splitRangeToNormals(x);
-
                 let forward_range = normalized_ranges.length === 1 ? normalized_ranges[0] : normalized_ranges[1];
-
-                let backward_range = normalized_ranges.length === 2 ? normalized_ranges[1] : null;
+                let backward_range = normalized_ranges.length === 2 ? normalized_ranges[0] : null;
 
                 if (forward_range) {
-                    let forward_indexes = _.range(forward_range.begin, forward_range.end);
+                    let forward_indexes = _.range(forward_range.begin, forward_range.end + 1);
                     let forward_expected_len = DBSet.getRangeLength(forward_indexes);
 
 
@@ -150,9 +145,13 @@ export default class DBSet<T> {
                 }
 
                 if (backward_range && this.params.cyclic && (this.params.capacity || this.isFullLoaded())) {
-                    backward_range = DBSet.convertInvertedRangeToNormal(backward_range, this.params.capacity);
+                    console.error("Backward range", backward_range);
 
-                    let backward_indexes = _.range(backward_range.begin, backward_range.end);
+                    backward_range = DBSet.convertInvertedRangeToNormal(backward_range, this.params.capacity + 1);
+
+                    console.error("Backward range normalized", backward_range);
+
+                    let backward_indexes = _.range(backward_range.begin, backward_range.end + 1);
                     let backward_expected_len = DBSet.getRangeLength(backward_indexes);
 
 
@@ -164,7 +163,7 @@ export default class DBSet<T> {
 
                 return _
                     .chain(final)
-                    //.filter((x: number) => x > 0)
+                    .filter((x: number) => x >= 0)
                     .map((x: number) => {
                         if (this.cache[x]) {
                             this.cache[x].state = ItemState.CACHED;
@@ -284,7 +283,7 @@ export default class DBSet<T> {
                 let state = this.current_state.getValue();
 
                 this.current_state.next(_.extend({}, state, {
-                    total: this.params.capacity,
+                    total: this.params.capacity + 1,
                 }));
             });
 
@@ -306,17 +305,18 @@ export default class DBSet<T> {
             .map(DBSet.recalculateIndex)
             .distinctUntilChanged()
             .map((x: CursorState) => {
+                //TODO: нормально подправлять индекс
                 return (Math.floor(x.real_index / (this.params.size)));
             })
             .map((x) => {
                 let chunk_len = this.params.size;
-                let left_side = chunk_len * x - this.params.left_buf;
+                let left_side = chunk_len * x - this.params.max_reserv;
 
                 if (!this.current_state.getValue().cyclic) {
                     left_side = left_side >= 0 ? left_side : 0;
                 }
 
-                let right_side = chunk_len * (x + 1) + this.params.right_buf;
+                let right_side = chunk_len * (x + 1) + this.params.max_reserv - 1;
 
                 return {
                     begin: left_side,
@@ -332,7 +332,7 @@ export default class DBSet<T> {
             })
             .map((x: Range) => {
             return _
-                .chain<number>(_.range(x.begin, x.end))
+                .chain<number>(_.range(x.begin, x.end + 1))
                 .filter((index: number) =>_.isUndefined(this.cache[index]))
                 .uniq()
                 .sortBy(a => a)
@@ -381,7 +381,7 @@ export default class DBSet<T> {
 
         result.push({
             begin: range.begin,
-            end: 0
+            end: -1
         });
 
         result.push({
