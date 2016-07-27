@@ -6,11 +6,12 @@ import {CursorItem, default as DBSet, ItemState} from "./src/DBSet";
 var MAX_SIZE = 15;
 
 var cursor = new DBSet<string>({
-    size: 3,
-    left_buf: 3,
-    right_buf: 3,
+    size: 2,
+    left_buf: 2,
+    right_buf: 2,
 
     cyclic: true,
+    capacity: 20,
 
     load_data: (frm: number, to: number) => {
         console.error(`frm[${frm}] to[${to}]`)

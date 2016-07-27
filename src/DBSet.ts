@@ -7,6 +7,7 @@ export interface CursorParams<T> {
     right_buf: number;
 
     cyclic: boolean;
+    capacity: number;
 
     load_data: (from: number, to: number) => JQueryPromise<T[]>
 }
@@ -24,7 +25,6 @@ export interface CursorItem<T> {
     state: ItemState;
 
 }
-
 
 interface CursorState {
     index: number;
@@ -56,87 +56,9 @@ export default class DBSet<T> {
         this.setupState();
         this.setupRanges();
 
-        let cached = this
-            .range_stream
-            .map((x: Range) => {
-                let range = _.range(x.begin, x.end);
-                let expected_len = DBSet.getRangeLength(range);
-
-                if (this.isFullLoaded()) {
-                    range = _.filter(range, (x: number) => {
-                        return !!this.cache[x];
-                    });
-
-                    let new_len = DBSet.getRangeLength(range);
-
-                    if (new_len < expected_len) {
-
-                        for (var i = 0; i < expected_len - new_len; i++) {
-                            range.push(i);
-                        }
-
-                    }
-                }
-
-                return _
-                    .chain(range)
-                    .map((x: number) => {
-                        if (this.cache[x]) {
-                            this.cache[x].state = ItemState.CACHED;
-                            return this.cache[x];
-                        }
-
-                        return {
-                            index: x,
-                            item: null,
-                            state: ItemState.LOADING
-                        };
-                    })
-                    .compact()
-                    .value();
-        });
-
-        this.remote_ranges_stream
-            .distinctUntilChanged(DBSet.rangesComparator)
-            .map((x: Range) => this.startRemoteLoading(x))
-            .flatMap((value: RemoteRequest<T>) => {
-                let newPromise: any = value.promise.then((resolved: T[]) => {
-                    let res: _.Dictionary<{index:number; item: T}> = {};
-
-                    if (resolved.length < DBSet.getRangeLength(value.indexes)) {
-                        let state = this.current_state.getValue();
-
-                        this.current_state.next(_.extend({}, state, {
-                            total: value.indexes[0] + resolved.length,
-                            full_loaded: true,
-                        }));
-                    }
-
-                    _.each(resolved, (val, i) => {
-                        res[value.indexes[i]] = {
-                            index: value.indexes[i],
-                            item: val,
-                        }
-                    });
-
-                    return res;
-                });
-
-                return Rx.Observable.fromPromise(newPromise);
-            })
-            .subscribe((x) => {
-                this.remote_chunks.next(
-                    _.map(x as _.Dictionary<CursorItem<T>>, (item) => {
-                        this.cache[item.index] = {
-                            index: item.index,
-                            item: item.item,
-                            state: ItemState.LOADED
-                        };
-                        return this.cache[item.index];
-                    })
-                );
-            });
-
+        let cached = this.getCachedStream();
+        this.forwardLoading();
+        this.backwardLoading();
 
         this.remote_chunks
             .combineLatest(
@@ -184,6 +106,200 @@ export default class DBSet<T> {
         });
     }
 
+
+    protected getCachedStream(): Rx.Observable<CursorItem<T>[]> {
+        return this
+            .range_stream
+            .map((x: Range) => {
+                // let range = _.range(x.begin, x.end);
+                // let expected_len = DBSet.getRangeLength(range);
+
+                // console.error(range);
+
+                let final = [];
+
+                let normalized_ranges = DBSet.splitRangeToNormals(x);
+
+                let forward_range = normalized_ranges.length === 1 ? normalized_ranges[0] : normalized_ranges[1];
+
+                let backward_range = normalized_ranges.length === 2 ? normalized_ranges[1] : null;
+
+                if (forward_range) {
+                    let forward_indexes = _.range(forward_range.begin, forward_range.end);
+                    let forward_expected_len = DBSet.getRangeLength(forward_indexes);
+
+
+                    if (this.isFullLoaded()) {
+                        forward_indexes = _.filter(forward_indexes, (x: number) => {
+                            return !!this.cache[x];
+                        });
+
+
+                        if (this.current_state.getValue().cyclic) {
+                            let delta = forward_expected_len - DBSet.getRangeLength(forward_indexes);
+
+                            if (delta > 0) {
+                                for (let i = 0; i <= delta; i++) {
+                                    forward_indexes.push(i);
+                                }
+                            }
+                        }
+                    }
+
+                    final = final.concat(forward_indexes);
+                }
+
+                if (backward_range && this.params.cyclic && (this.params.capacity || this.isFullLoaded())) {
+                    backward_range = DBSet.convertInvertedRangeToNormal(backward_range, this.params.capacity);
+
+                    let backward_indexes = _.range(backward_range.begin, backward_range.end);
+                    let backward_expected_len = DBSet.getRangeLength(backward_indexes);
+
+
+                    console.error("Tail", backward_indexes);
+
+
+                    final = backward_indexes.reverse().concat(final);
+                }
+
+                return _
+                    .chain(final)
+                    //.filter((x: number) => x > 0)
+                    .map((x: number) => {
+                        if (this.cache[x]) {
+                            this.cache[x].state = ItemState.CACHED;
+                            return this.cache[x];
+                        }
+
+                        return {
+                            index: x,
+                            item: null,
+                            state: ItemState.LOADING
+                        };
+                    })
+                    .compact()
+                    .value();
+            });
+    }
+
+    protected forwardLoading() {
+        //forward loading
+        this.remote_ranges_stream
+            .filter(x => !DBSet.isRangeInverted(x))
+            .distinctUntilChanged(DBSet.rangesComparator)
+            .map((x: Range) => this.startRemoteLoading(x))
+            .flatMap((value: RemoteRequest<T>) => {
+                let newPromise: any = value.promise.then((resolved: T[]) => {
+                    let res: _.Dictionary<{index: number; item: T}> = {};
+
+                    if (resolved.length < DBSet.getRangeLength(value.indexes)) {
+                        let state = this.current_state.getValue();
+
+                        this.current_state.next(_.extend({}, state, {
+                            total: value.indexes[0] + resolved.length,
+                            full_loaded: true,
+                        }));
+                    }
+
+                    _.each(resolved, (val, i) => {
+                        res[value.indexes[i]] = {
+                            index: value.indexes[i],
+                            item: val,
+                        }
+                    });
+
+                    return res;
+                });
+
+                return Rx.Observable.fromPromise(newPromise);
+            })
+            .subscribe((x) => {
+                this.remote_chunks.next(
+                    _.map(x as _.Dictionary<CursorItem<T>>, (item) => {
+                        this.cache[item.index] = {
+                            index: item.index,
+                            item: item.item,
+                            state: ItemState.LOADED
+                        };
+                        return this.cache[item.index];
+                    })
+                );
+            });
+    }
+
+    protected backwardLoading() {
+        //если в параметрах такого нет - просто не запускаем процедуру
+        if (!this.params.cyclic || !this.params.capacity) {
+            return;
+        }
+
+        let backward_range = new Rx.Subject<Range>();
+        backward_range
+            .map((x: Range) => {
+                return DBSet.convertInvertedRangeToNormal(x, this.params.capacity);
+            })
+            .map((x) => this.startRemoteLoading(x))
+            .flatMap((value: RemoteRequest<T>) => {
+                console.error("Backward", value.indexes);
+                let newPromise: any = value.promise.then((resolved: T[]) => {
+                    let res: _.Dictionary<{index: number; item: T}> = {};
+
+                    _.each(resolved, (val, i) => {
+                        res[value.indexes[i]] = {
+                            index: value.indexes[i],
+                            item: val,
+                        }
+                    });
+
+                    return [res, value.indexes];
+                });
+
+                return Rx.Observable.fromPromise(newPromise);
+            })
+            .subscribe((x: any[]) => {
+                let result = x[0] as _.Dictionary<CursorItem<T>>;
+
+                if (_.isEmpty(result)) {
+                    this.params.capacity -= x[1].length;
+
+                    backward_range.next({
+                        begin: -3,
+                        end: -1
+                    });
+
+                    return;
+                }
+
+                let max_index = 0;
+                _.each(result, (item: CursorItem<T>) => {
+                    if (item.index > max_index) {
+                        max_index = item.index;
+                    }
+
+                    this.cache[item.index] = item;
+                });
+
+                this.params.capacity = max_index;
+
+                let state = this.current_state.getValue();
+
+                this.current_state.next(_.extend({}, state, {
+                    total: this.params.capacity,
+                }));
+            });
+
+        //backward loading
+        this.remote_ranges_stream
+            .takeUntil(backward_range)
+            .filter((x: Range) => DBSet.isRangeInverted(x))
+            .distinctUntilChanged(DBSet.rangesComparator)
+            .filter(() => !!this.params.cyclic && !!this.params.capacity)
+            .subscribe((x) => {
+                console.error(x);
+                backward_range.next(x);
+            });
+    }
+
     protected setupRanges():void {
         this.range_stream = this
             .current_state
@@ -195,16 +311,25 @@ export default class DBSet<T> {
             .map((x) => {
                 let chunk_len = this.params.size;
                 let left_side = chunk_len * x - this.params.left_buf;
+
+                if (!this.current_state.getValue().cyclic) {
+                    left_side = left_side >= 0 ? left_side : 0;
+                }
+
                 let right_side = chunk_len * (x + 1) + this.params.right_buf;
 
                 return {
-                    begin: left_side >= 0 ? left_side : 0,
+                    begin: left_side,
                     end: right_side,
                 };
         });
 
         this.remote_ranges_stream = this.range_stream
             .distinctUntilChanged()
+            .map((x: Range) => DBSet.splitRangeToNormals(x))
+            .flatMap((x: Range[]) => {
+                return Rx.Observable.from(x);
+            })
             .map((x: Range) => {
             return _
                 .chain<number>(_.range(x.begin, x.end))
@@ -214,12 +339,19 @@ export default class DBSet<T> {
                 .value();
             })
             .filter(x => x.length > 1)
-            .filter(x => !this.isFullLoaded())
             .map((x: number[]) => {
-                return {
+                let res = {
                     begin: x[0],
                     end: x[x.length - 1]
                 };
+                return res;
+            })
+            .filter(x => {
+                if (this.isFullLoaded()) {
+                    return x.begin >= 0;
+                }
+
+                return true;
             });
     }
 
@@ -235,14 +367,47 @@ export default class DBSet<T> {
     }
 
     private static getRangeLength(indexes: number[]): number {
+        return indexes.length;
+
         return indexes[indexes.length - 1] - indexes[0] + 1;
+    }
+
+    private static splitRangeToNormals(range: Range): Range[] {
+        if (range.begin >= 0) {
+            return [range];
+        }
+
+        let result = [];
+
+        result.push({
+            begin: range.begin,
+            end: 0
+        });
+
+        result.push({
+            begin: 0,
+            end: range.end
+        });
+
+        return result;
     }
 
     private static rangesComparator(a: Range, b: Range) {
         return a.begin === b.begin && a.end === b.end;
     }
 
-    protected static recalculateIndex(state: CursorState): CursorState {
+    private static isRangeInverted(x: Range): boolean {
+        return x.begin < 0;
+    }
+
+    private static convertInvertedRangeToNormal(x: Range, total: number): Range {
+        return {
+            begin: total + x.begin,
+            end: total + x.end
+        };
+    }
+
+    private static recalculateIndex(state: CursorState): CursorState {
         let new_state = state;
 
         if (state.cyclic && state.full_loaded) {
@@ -271,7 +436,7 @@ export default class DBSet<T> {
 
     private range_stream: Rx.Observable<Range>;
 
-    private remote_chunks: Rx.BehaviorSubject<CursorItem<T>[]>; // = new ([]);
+    private remote_chunks: Rx.BehaviorSubject<CursorItem<T>[]>;
 
     private remote_ranges_stream: Rx.Observable<Range>;
 
